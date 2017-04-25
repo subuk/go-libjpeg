@@ -169,10 +169,12 @@ func Encode(w io.Writer, src image.Image, opt *EncoderOptions) (err error) {
 		err = encodeYCbCr(cinfo, s, opt)
 	case *image.Gray:
 		err = encodeGray(cinfo, s, opt)
+	case *image.NRGBA:
+		err = encodeNRGBA(cinfo, s, opt)
 	case *image.RGBA:
 		err = encodeRGBA(cinfo, s, opt)
 	default:
-		return errors.New("unsupported image type")
+		return fmt.Errorf("unsupported image type: %T", src)
 	}
 
 	return
@@ -237,6 +239,27 @@ func encodeYCbCr(cinfo *C.struct_jpeg_compress_struct, src *image.YCbCr, p *Enco
 
 // encode image.RGBA
 func encodeRGBA(cinfo *C.struct_jpeg_compress_struct, src *image.RGBA, p *EncoderOptions) (err error) {
+	// Set up compression parameters
+	cinfo.image_width = C.JDIMENSION(src.Bounds().Dx())
+	cinfo.image_height = C.JDIMENSION(src.Bounds().Dy())
+	cinfo.input_components = 4
+	cinfo.in_color_space = getJCS_EXT_RGBA()
+	if cinfo.in_color_space == C.JCS_UNKNOWN {
+		return errors.New("JCS_EXT_RGBA is not supported (probably built without libjpeg-trubo)")
+	}
+
+	C.jpeg_set_defaults(cinfo)
+	setupEncoderOptions(cinfo, p)
+
+	// Start compression
+	C.jpeg_start_compress(cinfo, C.TRUE)
+	C.encode_rgba(cinfo, C.JSAMPROW(unsafe.Pointer(&src.Pix[0])), C.int(src.Stride))
+	C.jpeg_finish_compress(cinfo)
+	return
+}
+
+// encode image.NRGBA
+func encodeNRGBA(cinfo *C.struct_jpeg_compress_struct, src *image.NRGBA, p *EncoderOptions) (err error) {
 	// Set up compression parameters
 	cinfo.image_width = C.JDIMENSION(src.Bounds().Dx())
 	cinfo.image_height = C.JDIMENSION(src.Bounds().Dy())
