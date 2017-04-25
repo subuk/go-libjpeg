@@ -80,6 +80,52 @@ static void encode_ycbcr(j_compress_ptr cinfo, JSAMPROW y_row, JSAMPROW cb_row, 
 	}
 }
 
+
+boolean set_sample_factors (j_compress_ptr cinfo, char *arg) {
+  int ci, val1, val2;
+  char ch1, ch2;
+
+  for (ci = 0; ci < MAX_COMPONENTS; ci++) {
+    if (*arg) {
+      ch2 = ',';
+      if (sscanf(arg, "%d%c%d%c", &val1, &ch1, &val2, &ch2) < 3)
+        return FALSE;
+      if ((ch1 != 'x' && ch1 != 'X') || ch2 != ',')
+        return FALSE;
+      if (val1 <= 0 || val1 > 4 || val2 <= 0 || val2 > 4) {
+        fprintf(stderr, "JPEG sampling factors must be 1..4\n");
+        return FALSE;
+      }
+      cinfo->comp_info[ci].h_samp_factor = val1;
+      cinfo->comp_info[ci].v_samp_factor = val2;
+      while (*arg && *arg++ != ',')
+        ;
+    } else {
+      cinfo->comp_info[ci].h_samp_factor = 1;
+      cinfo->comp_info[ci].v_samp_factor = 1;
+    }
+  }
+  return TRUE;
+}
+
+
+static void set_quality_ratings (j_compress_ptr cinfo, int64_t *ratings, boolean force_baseline) {
+  float val = 0.f;
+  int tblno = 0;
+
+  for (tblno = 0; tblno < NUM_QUANT_TBLS; tblno++) {
+  	val = ratings[tblno];
+	cinfo->q_scale_factor[tblno] = jpeg_float_quality_scaling(val);
+  }
+  jpeg_default_qtables(cinfo, force_baseline);
+
+  if (val >= 90) {
+    set_sample_factors(cinfo, "1x1");
+  } else if (val >= 80) {
+    set_sample_factors(cinfo, "2x1");
+  }
+}
+
 */
 import "C"
 
@@ -94,6 +140,7 @@ import (
 // EncoderOptions specifies which settings to use during Compression.
 type EncoderOptions struct {
 	Quality        int
+	QualityRatings []int
 	OptimizeCoding bool
 	DCTMethod      DCTMethod
 }
@@ -235,7 +282,24 @@ func encodeGray(cinfo *C.struct_jpeg_compress_struct, src *image.Gray, p *Encode
 }
 
 func setupEncoderOptions(cinfo *C.struct_jpeg_compress_struct, opt *EncoderOptions) {
-	C.jpeg_set_quality(cinfo, C.int(opt.Quality), C.TRUE)
+	if opt.Quality > 0 {
+		C.jpeg_set_quality(cinfo, C.int(opt.Quality), C.TRUE)
+	} else {
+		if len(opt.QualityRatings) > 0 {
+			// Convert opt.QualityRatings to [NumQuantTables]int64{} and multiplicate
+			// the last opt.QualityRatings value if len(opt.QualityRatings) < NumQuantTables
+			qrs := [NumQuantTables]int64{}
+			var qr int64
+			for i := 0; i < NumQuantTables; i++ {
+				if len(opt.QualityRatings) > i {
+					qr = int64(opt.QualityRatings[i])
+				}
+				qrs[i] = qr
+			}
+			cRatings := (*C.int64_t)(unsafe.Pointer(&qrs[0]))
+			C.set_quality_ratings(cinfo, cRatings, C.TRUE)
+		}
+	}
 	if opt.OptimizeCoding {
 		cinfo.optimize_coding = C.TRUE
 	} else {

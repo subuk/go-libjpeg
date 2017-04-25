@@ -43,6 +43,8 @@ const (
 	DCTFloat DCTMethod = C.JDCT_FLOAT
 )
 
+const NumQuantTables = C.NUM_QUANT_TBLS
+
 func getJCS_EXT_RGBA() C.J_COLOR_SPACE {
 	return C.getJCS_EXT_RGBA()
 }
